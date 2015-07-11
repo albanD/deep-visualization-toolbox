@@ -22,6 +22,7 @@ from core import CodependentThread
 from image_misc import norm01, norm01c, norm0255, tile_images_normalize, ensure_float01, tile_images_make_tiles, ensure_uint255_and_resize_to_fit, caffe_load_image, get_tiles_height_width
 from image_misc import FormattedString, cv2_typeset_text, to_255
 
+import lua
 
 def net_preproc_forward(net, img):
     assert img.shape == (227,227,3), 'img is wrong size'
@@ -98,7 +99,7 @@ class CaffeProcThread(CodependentThread):
         CodependentThread.__init__(self, heartbeat_required)
         self.daemon = True
         self.net = net
-        self.input_dims = self.net.blobs['data'].data.shape[2:4]    # e.g. (227,227)
+        self.input_dims = (227,227)#self.net.blobs['data'].data.shape[2:4]    # e.g. (227,227)
         self.state = state
         self.frames_processed_fwd = 0
         self.frames_processed_back = 0
@@ -154,8 +155,8 @@ class CaffeProcThread(CodependentThread):
                     net_preproc_forward(self.net, im_small)
 
             if run_back:
-                diffs = self.net.blobs[backprop_layer].diff * 0
-                diffs[0][backprop_unit] = self.net.blobs[backprop_layer].data[0,backprop_unit]
+                diffs = self.net.get(net,backprop_layer).gradInput * 0
+                diffs[0][backprop_unit] = self.net.get(net,backprop_layer).output[0,backprop_unit]
 
                 assert back_mode in ('grad', 'deconv')
                 if back_mode == 'grad':
@@ -299,8 +300,8 @@ class CaffeVisAppState(object):
         self.lock = Lock()  # State is accessed in multiple threads
         self.settings = settings
         self.bindings = bindings
-        self._layers = net.blobs.keys()
-        self._layers = self._layers[1:]  # chop off data layer
+        self._layers = np.arange(1,net.size(net)+1)
+        #self._layers = self._layers[1:]  # chop off data layer
         self.layer_boost_indiv_choices = self.settings.caffevis_boost_indiv_choices   # 0-1, 0 is noop
         self.layer_boost_gamma_choices = self.settings.caffevis_boost_gamma_choices   # 0-inf, 1 is noop
         self.caffe_net_state = 'free'     # 'free', 'proc', or 'draw'
@@ -561,20 +562,27 @@ class CaffeVisApp(BaseApp):
         #    self.net.set_mode_cpu()
         #    print 'CaffeVisApp mode: CPU'
         # caffe.set_phase_test()       # TEST is default now
+        #self.net = caffe.Classifier(
+        #    settings.caffevis_deploy_prototxt,
+        #    settings.caffevis_network_weights,
+        #    mean = self._data_mean,
+        #    channel_swap = self._net_channel_swap,
+        #    raw_scale = self._range_scale,
+        #    #image_dims = (227,227),
+        #)
+
+        lua.require('torch')
+        lua.require('nn')
         if settings.caffevis_mode_gpu:
-            caffe.set_mode_gpu()
+            lua.require('cunn')
+        self.net = lua.eval('torch.load("%s")'%self.caffevis_lua_net)
+        if settings.caffevis_mode_gpu:
+            net.cuda(net)
             print 'CaffeVisApp mode: GPU'
         else:
-            caffe.set_mode_cpu()
+            net.float(net)
             print 'CaffeVisApp mode: CPU'
-        self.net = caffe.Classifier(
-            settings.caffevis_deploy_prototxt,
-            settings.caffevis_network_weights,
-            mean = self._data_mean,
-            channel_swap = self._net_channel_swap,
-            raw_scale = self._range_scale,
-            #image_dims = (227,227),
-        )
+
 
         self.labels = None
         if self.settings.caffevis_labels:
@@ -744,7 +752,7 @@ class CaffeVisApp(BaseApp):
         clr_0 = to_255(self.settings.caffevis_class_clr_0)
         clr_1 = to_255(self.settings.caffevis_class_clr_1)
 
-        probs_flat = self.net.blobs['prob'].data.flatten()
+        probs_flat = self.net.output.flatten()
         top_5 = probs_flat.argsort()[-1:-6:-1]
 
         strings = []
@@ -834,9 +842,9 @@ class CaffeVisApp(BaseApp):
         '''Returns the data shown in highres format, b01c order.'''
         
         if self.state.layers_show_back:
-            layer_dat_3D = self.net.blobs[self.state.layer].diff[0]
+            layer_dat_3D = self.net.get(net,self.state.layer).gradInput[0]
         else:
-            layer_dat_3D = self.net.blobs[self.state.layer].data[0]
+            layer_dat_3D = self.net.get(net,self.state.layer).output[0]
         # Promote FC layers with shape (n) to have shape (n,1,1)
         if len(layer_dat_3D.shape) == 1:
             layer_dat_3D = layer_dat_3D[:,np.newaxis,np.newaxis]
@@ -991,7 +999,7 @@ class CaffeVisApp(BaseApp):
         else:
             # One of the backprop modes is enabled and the back computation (gradient or deconv) is up to date
             
-            grad_blob = self.net.blobs['data'].diff
+            grad_blob = self.net.get(net,1).gradInput
 
             #print '****grad_blob min,max =', grad_blob.min(), grad_blob.max()
             #c1diff = self.net.blobs['conv1'].diff
