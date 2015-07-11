@@ -1,6 +1,12 @@
 #! /usr/bin/env python
 # -*- coding: utf-8
 
+import ctypes
+luajitlib = ctypes.CDLL("libluajit.so", mode=ctypes.RTLD_GLOBAL)
+follylib = ctypes.CDLL("libfolly.so", mode=ctypes.RTLD_GLOBAL)
+THlib = ctypes.CDLL("libTH.so", mode=ctypes.RTLD_GLOBAL)
+luaTlib = ctypes.CDLL("libluaT.so", mode=ctypes.RTLD_GLOBAL)
+
 import sys
 import os
 import cv2
