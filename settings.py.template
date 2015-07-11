@@ -73,6 +73,7 @@ caffevis_network_weights = root_dir + '/models/caffenet-yos/caffenet-yos-weights
 caffevis_data_mean       = root_dir + '/models/caffenet-yos/ilsvrc_2012_mean.npy'
 caffevis_labels          = root_dir + '/models/caffenet-yos/ilsvrc_2012_labels.txt'
 caffevis_unit_jpg_dir    = root_dir + '/models/caffenet-yos/unit_jpg_vis'
+caffevis_lua_net         = root_dir + '/models/lua_model/model.t7'
 
 caffevis_data_hw         = (227,227)
 caffevis_label_layers    = ('fc8', 'prob')

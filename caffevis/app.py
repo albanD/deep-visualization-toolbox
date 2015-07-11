@@ -24,12 +24,23 @@ from image_misc import FormattedString, cv2_typeset_text, to_255
 
 import lua
 
+_net_channel_swap = None
+_range_scale = None
+_data_mean = None
+
 def net_preproc_forward(net, img):
     assert img.shape == (227,227,3), 'img is wrong size'
     #resized = caffe.io.resize_image(img, net.image_dims)   # e.g. (227, 227, 3)
-    data_blob = net.transformer.preprocess('data', img)                # e.g. (3, 227, 227), mean subtracted and scaled to [0,255]
+    #data_blob = net.transformer.preprocess('data', img)                # e.g. (3, 227, 227), mean subtracted and scaled to [0,255]
+    # Do the preprocessing
+    data_blob = img.astype(np.float32, copy=False)
+    data_blob = data_blob.transpose((2,0,1))
+    data_blob = data_blob[_net_channel_swap, :, :]
+    data_blob *= _range_scale
+    data_blob -= _data_mean
+
     data_blob = data_blob[np.newaxis,:,:,:]                   # e.g. (1, 3, 227, 227)
-    output = net.forward(data=data_blob)
+    output = net.forward(net, data_blob)
     return output
 
 # DEPRECATED
@@ -300,7 +311,7 @@ class CaffeVisAppState(object):
         self.lock = Lock()  # State is accessed in multiple threads
         self.settings = settings
         self.bindings = bindings
-        self._layers = np.arange(1,net.size(net)+1)
+        self._layers = [str(nbr) for nbr in np.arange(1,net.size(net)+1)]
         #self._layers = self._layers[1:]  # chop off data layer
         self.layer_boost_indiv_choices = self.settings.caffevis_boost_indiv_choices   # 0-1, 0 is noop
         self.layer_boost_gamma_choices = self.settings.caffevis_boost_gamma_choices   # 0-inf, 1 is noop
@@ -527,6 +538,11 @@ class CaffeVisApp(BaseApp):
     '''App to visualize using caffe.'''
 
     def __init__(self, settings, key_bindings):
+        # should not be done....
+        global _net_channel_swap
+        global _range_scale
+        global _data_mean
+
         super(CaffeVisApp, self).__init__(settings, key_bindings)
         print 'Got settings', settings
         self.settings = settings
@@ -536,7 +552,7 @@ class CaffeVisApp(BaseApp):
         import caffe
 
         try:
-            self._data_mean = np.load(settings.caffevis_data_mean)
+            _data_mean = np.load(settings.caffevis_data_mean)
         except IOError:
             print '\n\nCound not load mean file:', settings.caffevis_data_mean
             print 'Ensure that the values in settings.py point to a valid model weights file, network'
@@ -546,14 +562,14 @@ class CaffeVisApp(BaseApp):
             raise
         
         # Crop center region (e.g. 227x227) if mean is larger (e.g. 256x256)
-        excess_h = self._data_mean.shape[1] - self.settings.caffevis_data_hw[0]
-        excess_w = self._data_mean.shape[2] - self.settings.caffevis_data_hw[1]
+        excess_h = _data_mean.shape[1] - self.settings.caffevis_data_hw[0]
+        excess_w = _data_mean.shape[2] - self.settings.caffevis_data_hw[1]
         assert excess_h >= 0 and excess_w >= 0, 'mean should be at least as large as %s' % repr(self.settings.caffevis_data_hw)
-        self._data_mean = self._data_mean[:, excess_h:(excess_h+self.settings.caffevis_data_hw[0]),
+        _data_mean = _data_mean[:, excess_h:(excess_h+self.settings.caffevis_data_hw[0]),
                                           excess_w:(excess_w+self.settings.caffevis_data_hw[1])]
-        self._net_channel_swap = (2,1,0)
-        self._net_channel_swap_inv = tuple([self._net_channel_swap.index(ii) for ii in range(len(self._net_channel_swap))])
-        self._range_scale = 1.0      # not needed; image comes in [0,255]
+        _net_channel_swap = (2,1,0)
+        self._net_channel_swap_inv = tuple([_net_channel_swap.index(ii) for ii in range(len(_net_channel_swap))])
+        _range_scale = 1.0      # not needed; image comes in [0,255]
         #self.net.set_phase_test()
         #if settings.caffevis_mode_gpu:
         #    self.net.set_mode_gpu()
@@ -575,12 +591,12 @@ class CaffeVisApp(BaseApp):
         lua.require('nn')
         if settings.caffevis_mode_gpu:
             lua.require('cunn')
-        self.net = lua.eval('torch.load("%s")'%self.caffevis_lua_net)
+        self.net = lua.eval('torch.load("%s")'%self.settings.caffevis_lua_net)
         if settings.caffevis_mode_gpu:
-            net.cuda(net)
+            self.net.cuda(self.net)
             print 'CaffeVisApp mode: GPU'
         else:
-            net.float(net)
+            self.net.float(self.net)
             print 'CaffeVisApp mode: CPU'
 
 
@@ -842,9 +858,9 @@ class CaffeVisApp(BaseApp):
         '''Returns the data shown in highres format, b01c order.'''
         
         if self.state.layers_show_back:
-            layer_dat_3D = self.net.get(net,self.state.layer).gradInput[0]
+            layer_dat_3D = self.net.get(self.net,int(self.state.layer)).gradInput[0]
         else:
-            layer_dat_3D = self.net.get(net,self.state.layer).output[0]
+            layer_dat_3D = self.net.get(self.net,int(self.state.layer)).output[0]
         # Promote FC layers with shape (n) to have shape (n,1,1)
         if len(layer_dat_3D.shape) == 1:
             layer_dat_3D = layer_dat_3D[:,np.newaxis,np.newaxis]
