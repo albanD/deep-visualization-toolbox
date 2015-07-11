@@ -1,6 +1,14 @@
 # Deep Visualization Toolbox Installation
 
 
+## This fork
+
+The purpose of this fork is to be able to use this toolbox with a torch model.
+
+We use a modified version of [lunatic-python](https://github.com/albanD/lunatic-python/tree/tensor_ndarray) to be able to use lua inside the python interpreter.
+
+*The following installations step has not yet been updated!!*
+
 
 ### Step 0: Compile master branch of caffe (optional)
 
@@ -10,7 +18,7 @@ machine. If you've never used Caffe before, it can take a bit of time to get all
 Note: You can set `CPU_ONLY := 1` in your `Makefile.config` to skip all the Cuda/GPU stuff. The Deep Visualization Toolbox can run with Caffe in either CPU or GPU mode.
 
 
-
+    
 ### Step 1: Compile the deconv-deep-vis-toolbox branch of caffe
 
 Instead of using the master branch of caffe, to use the demo
